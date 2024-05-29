@@ -1,0 +1,73 @@
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, Trainer, TrainingArguments, TextDataset, DataCollatorForLanguageModeling
+
+def load_dataset(file_path, tokenizer, block_size=512):
+    return TextDataset(
+        tokenizer=tokenizer,
+        file_path=file_path,
+        block_size=block_size
+    )
+
+def fine_tune(model_name, train_file, output_dir, epochs=1):
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+    
+    train_dataset = load_dataset(train_file, tokenizer)
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        overwrite_output_dir=True,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=1,
+        save_steps=10_000,
+        save_total_limit=2,
+    )
+    
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=train_dataset,
+    )
+    
+    trainer.train()
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+
+# Fine-tune the model
+fine_tune("gpt2", "hacking_osint_dataset.txt", "./fine_tuned_hacking_osint_model")
+python fine_tune.py
+from flask import Flask, request, jsonify
+from transformers import GPT2LMHeadModel, GPT2Tokenizer, pipeline
+
+app = Flask(__name__)
+
+model_name = "./fine_tuned_hacking_osint_model"
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+model = GPT2LMHeadModel.from_pretrained(model_name)
+generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    data = request.json
+    prompt = data.get("prompt", "")
+    max_length = data.get("max_length", 50)
+    num_return_sequences = data.get("num_return_sequences", 1)
+    
+    responses = generator(prompt, max_length=max_length, num_return_sequences=num_return_sequences)
+    texts = [response['generated_text'] for response in responses]
+    
+    return jsonify({"responses": texts})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+Flask==2.0.1
+transformers==4.9.2
+torch==1.9.0
+gunicorn==20.1.0
+web: gunicorn app:app
+python-3.8.12
+git init
+git add .
+git commit -m "Initial commit"
+curl -X POST https://YOUR_RENDER_URL/generate -H "Content-Type: application/json" -d '{"prompt": "Come posso avviare un penetration test?", "max_length": 50, "num_return_sequences": 1}'
